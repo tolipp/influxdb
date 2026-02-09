@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "influxdb-toolkit"
+version = "0.1.0"
+description = "Unified Python API for InfluxDB v1 and v2 with extension points for v3."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "HSLU", email = "research-engineering@hslu.ch"},
+]
+keywords = ["influxdb", "timeseries", "influxql", "flux"]
+dependencies = [
+  "pandas>=2.0.0",
+  "python-dotenv>=1.0.0",
+  "requests>=2.31.0",
+  "influxdb>=5.3.1",
+  "influxdb-client>=1.41.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-cov>=5.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
