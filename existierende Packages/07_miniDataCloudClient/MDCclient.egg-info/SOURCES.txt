@@ -1,0 +1,8 @@
+README.md
+setup.py
+MDCclient.egg-info/PKG-INFO
+MDCclient.egg-info/SOURCES.txt
+MDCclient.egg-info/dependency_links.txt
+MDCclient.egg-info/top_level.txt
+mdcclient/__init__.py
+mdcclient/_func.py

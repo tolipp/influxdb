@@ -1,0 +1,5 @@
+# InfluxDB
+INFLUXDB_HOST = 'tbd'
+INFLUXDB_PORT = '8086'
+INFLUXDB_USER = 'tbd'
+INFLUXDB_PWD = 'tbd'

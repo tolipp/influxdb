@@ -1,0 +1,324 @@
+
+# # Testcalls
+# host = "10.180.26.130"
+# port = "8086"
+# user = NULL
+# pwd = NULL
+# database = "huettengraben"
+# measurement = "HK02_00_TMP_MET_AT_RT"
+# measurement = "HK02_01_WAE_FBH_RZ"
+# measurement = "HK14_04_ELE_WHG_EG_2_RZ"
+# datetimeStart = "2000-01-01 00:00:00"
+# datetimeStart = "2020-01-01 00:00:00"
+# datetimeEnd = "2020-02-01 00:00:00"
+# datetimeEnd = Sys.time()
+# datetimeStart = NULL
+# datetimeEnd = NULL
+# func = "raw"
+# func = "diffMax"
+# func = "mean"
+# func = "min"
+# func = "max"
+# func = "median"
+# agg = "15m"
+# agg = "1h"
+# agg = "1d"
+# agg = "1W"
+# agg = "1M"
+# agg = "1Y"
+# fieldKey = "raw"
+# fill = "0"
+# locTimeZone = "Europe/Zurich"
+# locTimeZone = "GMT"
+# locTimeZone = "UTC"
+# 
+# # show databases
+# influxdbGetDatabases(host)
+# 
+# influxdbGetMeasurements(host = host, database = database)
+# 
+# test <- influxdbGetTimeseries(host = host, database = database, measurement = measurement, datetimeStart = datetimeStart, datetimeEnd = datetimeEnd, func = func, agg = agg, fieldKey = fieldKey)
+# head(test)
+# summary(test)
+
+library(dplyr)
+library(lubridate)
+
+influxdbCon <- function(host, port = "8086", user, pwd){
+  
+  con <<- tryCatch({
+    influx_connection(host = host,
+                      port = port,
+                      user = user,
+                      pass = pwd)
+  }, error = function(e) {
+    print("Error in influxdbCon")
+    print(e)
+  }
+  )
+  
+  return(con)
+}
+
+influxdbGetDatabases <- function(host, port = "8086", user = NULL, pwd = NULL){
+  influxCon = influxdbCon(host, port, user, pwd)
+  if(is.null(influxCon)){
+    data <- NULL
+  }else{
+    data <- as.data.frame(show_databases(con = influxCon))
+  }
+  return(data)
+}
+
+influxdbGetMeasurements <- function(host, port = "8086", user = NULL, pwd = NULL, database){
+  influxCon = influxdbCon(host, port, user, pwd)
+  if(is.null(influxCon)){
+    data <- NULL
+  }else{
+    data <- as.data.frame(show_measurements(con = influxCon, db = database))
+  }
+  return(data)
+}
+
+influxdbGetFieldKeys <- function(host, port = "8086", user = NULL, pwd = NULL, database = NULL, datapoint = NULL){
+  influxCon = influxdbCon(host, port, user, pwd)
+  if(is.null(influxCon)){
+    data <- NULL
+  }else{
+    data <- as.data.frame(show_field_keys(con = influxCon, db = database, measurement = datapoint))
+    data <- data %>% select(fieldKey)
+  }
+  
+  return(data)
+}
+
+influxdbWriteDf <- function(host, port = "8086", user = NULL, pwd = NULL, database = NULL, df, measurement, time_col = "time"){
+  # change column-name to value because that is the field in influxdb
+  colnames(df) <- c(time_col,'value')
+  influxCon = influxdbCon(host, port, user, pwd)
+  influx_write(con = influxCon, 
+               db = database,
+               x = df,
+               time_col = time_col,
+               measurement = measurement)
+}
+
+influxdbGetTimeseries <- function(host, port = "8086", user = NULL, pwd = NULL, database, measurement,
+                                  datetimeStart = NULL, datetimeEnd = NULL,
+                                  func = "raw", agg = "1d", fieldKey = "value", fill = "null", valueFactor = 1, valueType = "absVal",
+                                  locTimeZone = "Europe/Zurich"){
+  
+  # influxDB doesn't support aggregations greater than 1d, thats why the data get fetched by 1d and later aggregated
+  aggOld <- agg
+  funcOld <- func
+  if((agg == "1W" | agg == "1M" | agg == "1Y") & (func != "raw")){
+      agg <- "1d"
+  }
+  
+  # increasing counter reading values
+  # get first raw values and then
+  # calculate difference to get consumption values further down
+  if(valueType == "counterVal"){
+    func <- "raw"
+  }
+  
+  # in case of diffMax the influxDB query gets first the max and then calculates the diff
+  if((aggOld == "1W" | aggOld == "1M" | aggOld == "1Y") & (func == "diffMax")){
+    func <- "max"
+  }
+  
+  switch(func,
+           raw = {
+             # get raw values
+             field_keys <- paste0('"', fieldKey,'"')
+             group_by <- NaN
+             tableName <- fieldKey
+           },
+           diffMax = {
+             # get difference from max values in aggregation range
+             field_keys <- paste0('difference(max(', '"', fieldKey, '"', '))')
+             group_by <- paste0('time(', agg, ')')
+             tableName <- "difference"
+           },
+           mean = {
+             # get mean values in aggregation range
+             field_keys <- paste0('mean(', '"', fieldKey, '"', ')')
+             group_by <- paste0('time(', agg, ')')
+             tableName <- "mean"
+           },
+           median = {
+             # get median values in certain range
+             field_keys <- paste0('median(', '"', fieldKey, '"', ')')
+             group_by <- paste0('time(', agg, ')')
+             tableName <- "median"
+           },
+           min = {
+             # get min values in aggregation range
+             field_keys <- paste0('min(', '"', fieldKey, '"', ')')
+             group_by <- paste0('time(', agg, ')')
+             tableName <- "min"
+           },
+           max = {
+             # get max values in aggregation range
+             field_keys <- paste0('max(', '"', fieldKey, '"', ')')
+             group_by <- paste0('time(', agg, ')')
+             tableName <- "max"
+           }
+         )
+  
+  if(is.null(fill) | fill == "NULL" | fill == "null" | fill == "none"){
+    fill <- "null"
+  }
+  
+  if(is.null(datetimeStart) && is.null(datetimeEnd)){
+    qry <- paste0("SELECT ", field_keys, " * ", valueFactor,
+                  " FROM ", '"', measurement,'"',
+                  " GROUP BY ", group_by,
+                  " Fill(", fill, ")", 
+                  " tz(","'",  locTimeZone, "'",")"
+    )
+  } else if (is.null(datetimeStart)){
+    time_end <- as.POSIXct(datetimeEnd, tz = locTimeZone)
+    where <- paste0("time <= ","'",
+                    as.character(time_end, format = "%Y-%m-%dT%H:%M:%OS.000", tz = "UTC"),"Z'"
+    )
+    qry <- paste0("SELECT ", field_keys, " * ", valueFactor,
+                  " FROM ", '"', measurement,'"',
+                  " WHERE ", where,
+                  " GROUP BY ", group_by,
+                  " Fill(", fill, ")", 
+                  " tz(","'",  locTimeZone, "'",")"
+    )
+  } else if (is.null(datetimeEnd)){
+    time_start <- as.POSIXct(datetimeStart, tz = locTimeZone)
+    where <- paste0("time >= ","'",
+                    as.character(time_start, format = "%Y-%m-%dT%H:%M:%OS.000", tz = "UTC"),"Z'"
+    )
+    qry <- paste0("SELECT ", field_keys, " * ", valueFactor,
+                  " FROM ", '"', measurement,'"',
+                  " WHERE ", where,
+                  " GROUP BY ", group_by,
+                  " Fill(", fill, ")", 
+                  " tz(","'",  locTimeZone, "'",")"
+    )
+  } else {
+    time_start <- as.POSIXct(datetimeStart, tz = locTimeZone)
+    time_end <- as.POSIXct(datetimeEnd, tz = locTimeZone)
+    where <- paste0("time >= ","'",
+                    as.character(time_start, format = "%Y-%m-%dT%H:%M:%OS.000", tz = "UTC"),"Z'",
+                    " AND time < ","'",
+                    as.character(time_end, format = "%Y-%m-%dT%H:%M:%OS.000", tz = "UTC"),"Z'"
+    )
+    qry <- paste0("SELECT ", field_keys, " * ", valueFactor,
+                  " FROM ", '"', measurement,'"',
+                  " WHERE ", where,
+                  " GROUP BY ", group_by,
+                  " Fill(", fill, ")", 
+                  " tz(","'",  locTimeZone, "'",")"
+    )
+  }
+  # message(qry)
+  data <- as.data.frame(influx_query(con = influxdbCon(host, port, user, pwd), db = database, query = qry, simplifyList = TRUE, return_xts = FALSE))
+
+  if(nrow(data) <= 1){
+    return(NULL)
+  } else {
+    data <- data %>%  select(time, tableName)
+  }
+
+  data$time <- parse_date_time(data$time, "YmdHM0S", tz = "UTC")
+  data$time <- with_tz(data$time, locTimeZone)
+  data$time <- round_date(data$time, unit = "second")
+  rownames(data) <- NULL
+  
+  data <- data %>% na.omit()
+  
+  if((aggOld == "1W" | aggOld == "1M" | aggOld == "1Y") & (func != "raw")){
+
+    xts <- xts(data[,-1], order.by = data$time)
+    colnames(xts) <- measurement
+    
+    switch(funcOld,
+           diffMax = {
+             # get difference from max values in aggregation range
+             data <- as.data.frame(aggregateXts(xts, "max", aggOld, locTimeZone))
+             data[[measurement]] <- data[[measurement]] - lag(data[[measurement]])
+             data <- data %>% na.omit()
+           },
+           {
+             # get values in aggregation range according to func argument
+             data <- as.data.frame(aggregateXts(xts, func, aggOld, locTimeZone))
+           }
+    )
+    data$time <- row.names(data)
+    data$time <- as.Date(data$time)
+    
+    # rearrange columns
+    data <- data %>% select(time, everything())
+    
+  }
+  
+  if(valueType == "counterVal"){
+    data[[2]] <- data[[2]] - lag(data[[2]])
+    data <- data %>% na.omit()
+    
+    if(funcOld != "raw"){
+      xts <- xts(data[,-1], order.by = data$time)
+      data <- fortify(aggregateXts(xts, funcOld, aggOld, locTimeZone))
+      names(data) <- c("time", measurement)
+    }
+
+    if((aggOld == "1d" | aggOld == "1W" | aggOld == "1M" | aggOld == "1Y") & (funcOld != "raw")){
+      data$time <- parse_date_time(data$time, "Ymd", tz = locTimeZone)
+    } else {
+      data$time <- parse_date_time(data$time, "Ymd HMS", tz = locTimeZone)
+    }
+    
+    # rearrange columns
+    data <- data %>% select(time, everything())
+  }
+
+  # delete first row
+  if(funcOld == "diffMax"){
+    data = data[-1,]
+  }
+  # delete/reindex
+  rownames(data) <- NULL
+  
+  # rename column names
+  names(data) <- c("time", measurement)
+  return(data)
+}
+
+influxdbGetTagValues <- function(host, port = "8086", user = NULL, pwd = NULL, database = NULL, datapoint = NULL, tag_key = "sensor"){
+  # Query to show tag keys
+  query <- paste0('SHOW TAG VALUES FROM ', '"', datapoint, '"', ' WITH KEY = ', '"', tag_key, '"')
+  url <- paste0("http://", host, ":", port, "/query")
+  response <- GET(url, query = list(q = query, db = database, u = user, p = pwd))
+  tag_values_list <- list()
+  
+  # Check if the request was successful
+  if (status_code(response) == 200) {
+    # Parse the response
+    content <- content(response, as = "text")
+    result <- fromJSON(content, flatten = TRUE)
+    
+    # Extract the tag values
+    tag_values <- result$results$series[[1]]$values
+    # Extract the matrix from the list
+    tag_values_matrix <- tag_values[[1]]
+    
+    # Extract the second column
+    second_column <- tag_values_matrix[, 2]
+    
+    # Convert to tibble
+    tag_values_tibble <- tibble(second_column = second_column)
+    
+    tag_values_list <- as.list(tag_values_tibble$second_column)
+    
+  } else {
+    stop("Failed to retrieve data: ", status_code(response))
+  }
+
+  return(tag_values_list)
+}
