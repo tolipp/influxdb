@@ -1,5 +1,5 @@
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from influxdb_toolkit.base import InfluxDBClientBase
 
@@ -42,8 +42,8 @@ class DummyClient(InfluxDBClientBase):
 
 def test_get_multiple_timeseries_merges():
     client = DummyClient()
-    start = datetime.utcnow() - timedelta(hours=1)
-    end = datetime.utcnow()
+    start = datetime.now(UTC) - timedelta(hours=1)
+    end = datetime.now(UTC)
     df = client.get_multiple_timeseries(
         [
             {"measurement": "m1", "fields": ["value"], "start": start, "end": end},

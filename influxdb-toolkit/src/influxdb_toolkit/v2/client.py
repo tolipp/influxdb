@@ -185,6 +185,7 @@ schema.fieldKeys(
         tag_columns: Optional[List[str]] = None,
         field_columns: Optional[List[str]] = None,
         time_column: str = "time",
+        batch_size: Optional[int] = None,
     ) -> WriteResult:
         self._ensure_writes_allowed("write_dataframe")
         if not self._bucket:
@@ -192,29 +193,40 @@ schema.fieldKeys(
         if time_column not in df.columns:
             raise ValueError("time_column must exist in dataframe")
         fields = field_columns or [c for c in df.columns if c not in ([time_column] + (tag_columns or []))]
-        df_write = df[[time_column] + (tag_columns or []) + fields].copy()
-        if time_column != "_time":
-            df_write = df_write.rename(columns={time_column: "_time"})
-        write_api = self._client.write_api()
-        write_api.write(
-            bucket=self._bucket,
-            org=self._org,
-            record=df_write,
-            data_frame_measurement_name=measurement,
-            data_frame_tag_columns=tag_columns or [],
-        )
-        return WriteResult(success=True, details={"rows": len(df_write)})
+        points: List[Dict[str, object]] = []
+        for _, row in df.iterrows():
+            point = {
+                "measurement": measurement,
+                "time": row[time_column],
+                "fields": {k: row[k] for k in fields},
+            }
+            if tag_columns:
+                point["tags"] = {k: str(row[k]) for k in tag_columns}
+            points.append(point)
+        return self.write_points(points, measurement=measurement, batch_size=batch_size)
 
-    def write_points(self, points: List[Dict[str, object]], measurement: str) -> WriteResult:
+    def write_points(
+        self,
+        points: List[Dict[str, object]],
+        measurement: str,
+        batch_size: Optional[int] = None,
+    ) -> WriteResult:
         self._ensure_writes_allowed("write_points")
         if not self._bucket:
             raise ValueError("bucket is required for v2 writes")
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("batch_size must be greater than zero")
         for p in points:
             if "measurement" not in p:
                 p["measurement"] = measurement
         write_api = self._client.write_api()
-        write_api.write(bucket=self._bucket, org=self._org, record=points)
-        return WriteResult(success=True, details={"points": len(points)})
+        chunks = _chunk_points(points, batch_size)
+        for chunk in chunks:
+            write_api.write(bucket=self._bucket, org=self._org, record=chunk)
+        return WriteResult(
+            success=True,
+            details={"points": len(points), "batch_size": batch_size, "batches": len(chunks)},
+        )
 
     def delete_range(
         self,
@@ -235,11 +247,32 @@ schema.fieldKeys(
 
     def create_bucket(self, name: str, retention: str = "0s") -> bool:
         self._ensure_writes_allowed("create_bucket")
-        retention_rules = None
-        if retention and retention != "0s":
-            raise UnsupportedOperationError("retention parsing not implemented yet")
-        self._client.buckets_api().create_bucket(bucket_name=name, org=self._org, retention_rules=retention_rules)
-        return True
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # retention_rules = None
+        # if retention and retention != "0s":
+        #     raise UnsupportedOperationError("retention parsing not implemented yet")
+        # self._client.buckets_api().create_bucket(
+        #     bucket_name=name, org=self._org, retention_rules=retention_rules
+        # )
+        raise UnsupportedOperationError("create_bucket is disabled until admin ops are approved")
+
+    def create_database(self, name: str) -> bool:
+        self._ensure_writes_allowed("create_database")
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # return self.create_bucket(name=name)
+        raise UnsupportedOperationError("create_database is disabled until admin ops are approved")
+
+    def delete_database(self, name: str) -> bool:
+        self._ensure_writes_allowed("delete_database")
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # buckets_api = self._client.buckets_api()
+        # if not hasattr(buckets_api, "find_bucket_by_name") or not hasattr(buckets_api, "delete_bucket"):
+        #     raise UnsupportedOperationError("delete_database is not supported by this client")
+        # bucket = buckets_api.find_bucket_by_name(name)
+        # if bucket is None:
+        #     raise InfluxDBQueryError(f"Bucket not found: {name}")
+        # buckets_api.delete_bucket(bucket)
+        raise UnsupportedOperationError("delete_database is disabled until admin ops are approved")
 
     def _execute_influxql_compat(self, query: str, timezone: str = "UTC") -> pd.DataFrame:
         if not self._bucket:
@@ -312,3 +345,9 @@ def _move_time_first(df: pd.DataFrame) -> pd.DataFrame:
         cols = ["time"] + [c for c in cols if c != "time"]
         return df.reindex(columns=cols)
     return df
+
+
+def _chunk_points(points: List[Dict[str, object]], batch_size: Optional[int]) -> List[List[Dict[str, object]]]:
+    if not batch_size:
+        return [points]
+    return [points[i : i + batch_size] for i in range(0, len(points), batch_size)]

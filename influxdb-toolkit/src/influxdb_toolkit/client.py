@@ -13,6 +13,34 @@ class InfluxDBClientFactory:
     """Factory for selecting the correct client implementation."""
 
     @staticmethod
+    def _detect_version(config: Mapping[str, Any]) -> int:
+        """Infer InfluxDB version from config keys.
+
+        v2 indicators: url/token/org
+        v1 indicators: host/database/user credentials keys
+        """
+        v2_keys = ("url", "token", "org")
+        v1_keys = ("host", "database", "username", "user", "password", "pwd")
+
+        has_v2 = any(config.get(k) not in (None, "") for k in v2_keys)
+        has_v1 = any(config.get(k) not in (None, "") for k in v1_keys)
+
+        if has_v2 and has_v1:
+            raise ValueError(
+                "Ambiguous config: contains both v1 and v2 keys. "
+                "Pass a clean config for one version, or set version explicitly."
+            )
+        if has_v2:
+            return 2
+        if has_v1:
+            return 1
+        raise ValueError(
+            "Could not infer InfluxDB version from config. "
+            "Provide v1 keys (host/database/username/password) or "
+            "v2 keys (url/token/org), or pass version explicitly."
+        )
+
+    @staticmethod
     def get_client(
         version: Optional[int] = None,
         config: Optional[Mapping[str, Any]] = None,
@@ -22,11 +50,7 @@ class InfluxDBClientFactory:
         client_override = config.get("client") if isinstance(config, Mapping) else None
 
         if version is None:
-            # Auto-detect: v2 uses url/token/org
-            if any(k in config for k in ("url", "token", "org")):
-                version = 2
-            else:
-                version = 1
+            version = InfluxDBClientFactory._detect_version(config)
 
         if version == 1:
             cfg = resolve_v1_config(config)

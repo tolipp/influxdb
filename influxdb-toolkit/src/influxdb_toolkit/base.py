@@ -163,11 +163,17 @@ class InfluxDBClientBase(ABC):
         tag_columns: Optional[List[str]] = None,
         field_columns: Optional[List[str]] = None,
         time_column: str = "time",
+        batch_size: Optional[int] = None,
     ) -> WriteResult:
         self._ensure_writes_allowed("write_dataframe")
         raise UnsupportedOperationError("write_dataframe not implemented for this client")
 
-    def write_points(self, points: List[Dict[str, object]], measurement: str) -> WriteResult:
+    def write_points(
+        self,
+        points: List[Dict[str, object]],
+        measurement: str,
+        batch_size: Optional[int] = None,
+    ) -> WriteResult:
         self._ensure_writes_allowed("write_points")
         raise UnsupportedOperationError("write_points not implemented for this client")
 
@@ -196,6 +202,10 @@ class InfluxDBClientBase(ABC):
     def create_user(self, username: str, password: str) -> bool:
         self._ensure_writes_allowed("create_user")
         raise UnsupportedOperationError("create_user not implemented for this client")
+
+    def delete_user(self, username: str) -> bool:
+        self._ensure_writes_allowed("delete_user")
+        raise UnsupportedOperationError("delete_user not implemented for this client")
 
     def grant_privileges(self, user: str, database: str) -> bool:
         self._ensure_writes_allowed("grant_privileges")

@@ -11,6 +11,7 @@ from .exceptions import (
     UnsupportedOperationError,
 )
 from .models import MeasurementSchema, WriteResult
+from .profiles import list_profile_names, resolve_profile
 
 __all__ = [
     "InfluxDBClientFactory",
@@ -25,4 +26,6 @@ __all__ = [
     "UnsupportedOperationError",
     "MeasurementSchema",
     "WriteResult",
+    "list_profile_names",
+    "resolve_profile",
 ]

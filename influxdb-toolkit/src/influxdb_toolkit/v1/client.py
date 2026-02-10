@@ -8,7 +8,7 @@ import logging
 import pandas as pd
 
 from ..base import InfluxDBClientBase
-from ..exceptions import InfluxDBConnectionError, InfluxDBQueryError
+from ..exceptions import InfluxDBConnectionError, InfluxDBQueryError, UnsupportedOperationError
 from ..models import WriteResult
 from .query_builder import build_influxql_query
 
@@ -181,6 +181,7 @@ class InfluxDBClientV1(InfluxDBClientBase):
         tag_columns: Optional[List[str]] = None,
         field_columns: Optional[List[str]] = None,
         time_column: str = "time",
+        batch_size: Optional[int] = None,
     ) -> WriteResult:
         self._ensure_writes_allowed("write_dataframe")
         if time_column not in df.columns:
@@ -196,22 +197,71 @@ class InfluxDBClientV1(InfluxDBClientBase):
             if tag_columns:
                 point["tags"] = {k: str(row[k]) for k in tag_columns}
             points.append(point)
-        try:
-            ok = bool(self._client.write_points(points))
-            return WriteResult(success=ok, details={"points": len(points)})
-        except Exception as exc:
-            raise InfluxDBQueryError(str(exc)) from exc
+        return self.write_points(points, measurement=measurement, batch_size=batch_size)
 
-    def write_points(self, points: List[Dict[str, object]], measurement: str) -> WriteResult:
+    def write_points(
+        self,
+        points: List[Dict[str, object]],
+        measurement: str,
+        batch_size: Optional[int] = None,
+    ) -> WriteResult:
         self._ensure_writes_allowed("write_points")
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("batch_size must be greater than zero")
         for p in points:
             if "measurement" not in p:
                 p["measurement"] = measurement
+
+        chunks = _chunk_points(points, batch_size)
+        batches = 0
+        overall_ok = True
         try:
-            ok = bool(self._client.write_points(points))
-            return WriteResult(success=ok, details={"points": len(points)})
+            for chunk in chunks:
+                batches += 1
+                ok = bool(self._client.write_points(chunk))
+                overall_ok = overall_ok and ok
+            return WriteResult(
+                success=overall_ok,
+                details={"points": len(points), "batch_size": batch_size, "batches": batches},
+            )
         except Exception as exc:
             raise InfluxDBQueryError(str(exc)) from exc
+
+    def create_database(self, name: str) -> bool:
+        self._ensure_writes_allowed("create_database")
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # qry = f'CREATE DATABASE "{name}"'
+        # self._client.query(qry)
+        raise UnsupportedOperationError("create_database is disabled until admin ops are approved")
+
+    def delete_database(self, name: str) -> bool:
+        self._ensure_writes_allowed("delete_database")
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # qry = f'DROP DATABASE "{name}"'
+        # self._client.query(qry)
+        raise UnsupportedOperationError("delete_database is disabled until admin ops are approved")
+
+    def create_user(self, username: str, password: str) -> bool:
+        self._ensure_writes_allowed("create_user")
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # safe_pwd = password.replace("'", "\\'")
+        # qry = f"CREATE USER \"{username}\" WITH PASSWORD '{safe_pwd}'"
+        # self._client.query(qry)
+        raise UnsupportedOperationError("create_user is disabled until admin ops are approved")
+
+    def delete_user(self, username: str) -> bool:
+        self._ensure_writes_allowed("delete_user")
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # qry = f'DROP USER "{username}"'
+        # self._client.query(qry)
+        raise UnsupportedOperationError("delete_user is disabled until admin ops are approved")
+
+    def grant_privileges(self, user: str, database: str) -> bool:
+        self._ensure_writes_allowed("grant_privileges")
+        # Deferred by project rule: do not execute real admin mutations yet.
+        # qry = f'GRANT ALL ON "{database}" TO "{user}"'
+        # self._client.query(qry)
+        raise UnsupportedOperationError("grant_privileges is disabled until admin ops are approved")
 
 
 def _move_time_first(df: pd.DataFrame) -> pd.DataFrame:
@@ -220,3 +270,9 @@ def _move_time_first(df: pd.DataFrame) -> pd.DataFrame:
         cols = ["time"] + [c for c in cols if c != "time"]
         return df.reindex(columns=cols)
     return df
+
+
+def _chunk_points(points: List[Dict[str, object]], batch_size: Optional[int]) -> List[List[Dict[str, object]]]:
+    if not batch_size:
+        return [points]
+    return [points[i : i + batch_size] for i in range(0, len(points), batch_size)]
