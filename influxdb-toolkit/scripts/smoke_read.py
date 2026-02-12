@@ -3,6 +3,8 @@
 Usage:
     py scripts/smoke_read.py --version 1
     py scripts/smoke_read.py --version 2
+    py scripts/smoke_read.py --list-profiles
+    py scripts/smoke_read.py --profile v1_flimatec
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import os
 import sys
 
 from influxdb_toolkit import InfluxDBClientFactory
+from influxdb_toolkit import list_profile_names, resolve_profile
 
 
 def _v1_config_from_env() -> dict:
@@ -55,8 +58,7 @@ def _v2_config_from_env() -> dict:
     }
 
 
-def run(version: int) -> int:
-    config = _v1_config_from_env() if version == 1 else _v2_config_from_env()
+def _run_with_config(version: int, config: dict) -> int:
     _suppress_v2_pivot_warnings(version)
 
     # Intentionally avoid context-manager connect() here because v1 ping can fail
@@ -102,6 +104,16 @@ def run(version: int) -> int:
     return 0
 
 
+def run(version: int) -> int:
+    config = _v1_config_from_env() if version == 1 else _v2_config_from_env()
+    return _run_with_config(version, config)
+
+
+def run_profile(profile_name: str) -> int:
+    version, config = resolve_profile(profile_name)
+    return _run_with_config(version, config)
+
+
 def _suppress_v2_pivot_warnings(version: int) -> None:
     if version != 2:
         return
@@ -116,9 +128,18 @@ def _suppress_v2_pivot_warnings(version: int) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run read-only smoke checks for influxdb-toolkit")
-    parser.add_argument("--version", type=int, choices=[1, 2], required=True, help="InfluxDB major version")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--version", type=int, choices=[1, 2], help="InfluxDB major version")
+    group.add_argument("--profile", type=str, help="Named profile from influxdb_toolkit.profiles")
+    group.add_argument("--list-profiles", action="store_true", help="List available profiles and exit")
     args = parser.parse_args()
     try:
+        if args.list_profiles:
+            for name in list_profile_names():
+                print(name)
+            return 0
+        if args.profile:
+            return run_profile(args.profile)
         return run(args.version)
     except Exception as exc:
         print(f"Smoke test failed: {exc}", file=sys.stderr)
@@ -127,5 +148,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

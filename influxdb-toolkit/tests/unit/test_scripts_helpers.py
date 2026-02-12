@@ -73,6 +73,18 @@ def test_smoke_run_uses_client_and_closes(monkeypatch) -> None:
     assert fake.closed is True
 
 
+def test_smoke_run_profile_uses_resolved_profile(monkeypatch) -> None:
+    smoke = _load_script("smoke_read_for_test_profile", "scripts/smoke_read.py")
+    calls: list[tuple[int, dict]] = []
+
+    monkeypatch.setattr(smoke, "resolve_profile", lambda _name: (2, {"url": "u", "token": "t", "org": "o", "bucket": "b"}))
+    monkeypatch.setattr(smoke, "_run_with_config", lambda version, config: calls.append((version, config)) or 0)
+
+    rc = smoke.run_profile("v2_meteo")
+    assert rc == 0
+    assert calls == [(2, {"url": "u", "token": "t", "org": "o", "bucket": "b"})]
+
+
 def test_schema_append_no_proxy_hosts_is_idempotent(monkeypatch) -> None:
     schema = _load_script("schema_report_for_test_proxy", "scripts/schema_report.py")
     monkeypatch.setenv("NO_PROXY", "localhost")
